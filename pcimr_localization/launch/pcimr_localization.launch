@@ -1,0 +1,4 @@
+<launch>
+    <node pkg="pcimr_localization" type="local" name="local" output="screen"/>
+
+</launch>

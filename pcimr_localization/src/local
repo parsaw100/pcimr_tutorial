@@ -1,0 +1,222 @@
+#!/usr/bin/env python
+import rospy
+import numpy as np
+from std_msgs.msg import String
+from std_msgs.msg import Float32
+from nav_msgs.msg import OccupancyGrid
+from sensor_msgs.msg import LaserScan
+from visualization_msgs.msg import Marker
+from geometry_msgs.msg import Point, Quaternion
+
+
+class Finder(object):
+
+    def __init__(self):
+
+        self.msg_robot_marker = Marker()
+        self.msg_robot_marker.header.frame_id = "map"
+        self.msg_robot_marker.ns = "navigation"
+        self.msg_robot_marker.id = 0
+        self.msg_robot_marker.type = Marker.CUBE
+        self.msg_robot_marker.action = Marker.ADD
+        self.msg_robot_marker.scale.x = 1
+        self.msg_robot_marker.scale.y = 1
+        self.msg_robot_marker.scale.z = 0.2
+        self.msg_robot_marker.color.a = 1.0
+        self.msg_robot_marker.color.r = 0.0
+        self.msg_robot_marker.color.g = 1.0
+        self.msg_robot_marker.color.b = 0.0
+        self.msg_robot_marker.pose.orientation = Quaternion(0, 0, 0, 1)
+
+        self.msg_occu_grid = OccupancyGrid()
+        self.msg_occu_grid.header.frame_id = 'map'
+        self.msg_occu_grid.header.seq = 0
+        self.msg_occu_grid.info.map_load_time = rospy.Time.now()
+        self.msg_occu_grid.info.resolution = 1
+        self.msg_occu_grid.info.height = 20
+        self.msg_occu_grid.info.width = 20
+
+        self.move_prob = rospy.get_param('~robot_move_probabilities', [0.9, 0.04, 0.04, 0.0, 0.02])
+
+        self.pub_pos = rospy.Publisher('/robot_pos', Point, queue_size=10)
+        self.pub_mark = rospy.Publisher('/visualization/robot_pos', Marker, queue_size=10)
+        self.pub_map = rospy.Publisher('/robot_pos_map', OccupancyGrid, queue_size=10)
+
+        self.sub_map = rospy.Subscriber('/map', OccupancyGrid, self.callback_map)
+        self.sub_scan = rospy.Subscriber('/scan', LaserScan, self.callback_sensor)
+        self.sub_move = rospy.Subscriber('/move', String, self.callback_move)
+
+        self.pos = Point()
+        self.map = np.array([], dtype=np.int16)
+        self.sensor_probability_map = np.zeros((20, 20, 4), dtype=np.int16)
+        self.probability_map = np.zeros((20,20), dtype= float)
+        self.pos.x, self.pos.y, self.pos.z = 2,2,0
+        self.scan = LaserScan()
+        self.move = ''
+        self.count = 0
+        self.init_probability = 1/150
+
+    def callback_sensor(self, data):
+        self.scan = data
+
+    def build_sensor_probabolity_map(self):
+        for row in range(20):
+            for col in range(20):
+                if self.map[row, col] == 0:
+
+                    #south
+                    x, y, d = row, col, 0
+                    while self.map[x , y] != 100 and x < 20:
+                        d = d + 1
+                        x = x + 1
+                    self.sensor_probability_map[row, col, 2] = d
+
+                    #north
+                    x, y, d = row, col, 0
+                    while self.map[x , y] != 100 and x >= 0:
+                        d = d + 1
+                        x = x - 1
+                    self.sensor_probability_map[row, col, 0] = d 
+                    
+                    #west    
+                    x, y, d = row, col, 0
+                    while self.map[x , y] != 100 and y < 20:
+                        d = d + 1
+                        if y == 19: break
+                        y = y + 1
+                    self.sensor_probability_map[row, col, 3] = d
+
+                    #east   
+                    x, y, d = row, col, 0 
+                    while self.map[x , y] != 100 and y >= 0:
+                        d = d + 1
+                        y = y - 1
+                    self.sensor_probability_map[row, col, 1] = d  
+
+    def init_probability_map(self):
+        self.probability_map = np.copy(self.map.astype(float))
+        self.probability_map[self.probability_map == 0] = self.init_probability
+
+    def move_probability(self):
+        if self.move == 'N':
+            prob_N = self.move_prob[0]
+            prob_W = self.move_prob[1]
+            prob_E = self.move_prob[2]
+            prob_S = self.move_prob[3]
+        elif self.move == 'E':
+            prob_N = self.move_prob[1]
+            prob_W = self.move_prob[3]
+            prob_E = self.move_prob[0]
+            prob_S = self.move_prob[2]
+        elif self.move == 'S':
+            prob_N = self.move_prob[3]
+            prob_W = self.move_prob[2]
+            prob_E = self.move_prob[1]
+            prob_S = self.move_prob[0]
+        elif self.move == 'W':
+            prob_N = self.move_prob[2]
+            prob_W = self.move_prob[0]
+            prob_E = self.move_prob[3]
+            prob_S = self.move_prob[1]
+        prob_stay = self.move_prob[4]
+
+        prob = np.copy(self.map)
+        prob_map = prob.astype(float)
+
+        for row in range(20):
+            for col in range(20):
+                if self.probability_map[row, col] <100 and self.probability_map[row, col] >= 0:
+
+                    if row < 19:
+                        if(self.probability_map[row + 1, col] < 100): #north
+                            prob_map[row, col] += self.probability_map[row + 1, col] * prob_S
+                        elif self.probability_map[row + 1, col] == 100: 
+                            prob_map[row, col] += self.probability_map[row, col] * prob_N
+                    elif row == 19: 
+                        prob_map[row, col] += self.probability_map[row, col] * prob_N
+
+                    if row > 0:
+                        if(self.probability_map[row - 1, col] < 100): #south
+                            prob_map[row, col] += self.probability_map[row - 1, col] * prob_N
+                        elif self.probability_map[row - 1, col] == 100: 
+                            prob_map[row, col] += self.probability_map[row, col] * prob_S     
+                    elif row == 0 : #and self.probability_map[row, col] < 100 : 
+                        prob_map[row, col] += self.probability_map[row, col] * prob_S      
+
+                    if col < 19:
+                        if(self.probability_map[row, col + 1] < 100): #east
+                            prob_map[row, col] += self.probability_map[row, col + 1] * prob_W
+                        elif self.probability_map[row, col + 1] == 100: 
+                            prob_map[row, col] += self.probability_map[row, col] * prob_E    
+                    elif col == 19: 
+                        prob_map[row, col] += self.probability_map[row, col] * prob_E     
+
+                    if col > 0:
+                        if(self.probability_map[row, col - 1] < 100): #west
+                            prob_map[row, col] += self.probability_map[row, col - 1] * prob_E
+                        elif self.probability_map[row, col - 1] == 100: 
+                            prob_map[row, col] += self.probability_map[row, col] * prob_W
+                    elif col == 0: 
+                        prob_map[row, col] += self.probability_map[row, col] * prob_W   
+
+                    prob_map[row, col] += self.probability_map[row, col] * prob_stay
+
+        self.probability_map = np.copy(prob_map) 
+        prob_map = prob.astype(float)
+        for row in range(20):
+            for col in range(20):
+                if self.probability_map[row, col] <100 and self.probability_map[row, col] >= 0:
+                    known = self.sensor_probability_map[row, col]
+                    sens = np.asarray(self.scan.ranges, np.int16)
+                    p1 = 1
+                    if max(abs(known - sens)) > 1:
+                        p1 = 0
+                    else:    
+                        for x in range(4):
+                            if known[x] - sens[x] == 0:
+                                p1 = p1 * 0.8
+                            else:
+                                p1 = p1 * 0.1
+                    prob_map[row, col] = p1 
+
+        p2 = np.copy(self.probability_map)
+        p2[(p2 == -1) | (p2 == 100)] = 1
+
+        prob_map[(prob_map == -1) | (prob_map == 100)] = 1        
+        p = np.multiply(self.probability_map, prob_map)
+        n = 1 / (np.sum(p[(p >= 0) & (p < 100)]))
+        p[(p > 0) & (p < 100)] = p[(p > 0) & (p < 100)] * n
+        self.probability_map = np.copy(p)
+        
+        grid_to_publish = np.copy(self.probability_map)
+        grid_to_publish[(grid_to_publish > 0) & (grid_to_publish < 100)] = grid_to_publish[(grid_to_publish > 0) & (grid_to_publish < 100)] * 100
+        self.msg_occu_grid.data = grid_to_publish.flatten().astype(int).tolist()
+        self.pub_map.publish(self.msg_occu_grid)
+
+        p[(p <0) | (p >= 100)] = 0
+
+        y,x = np.unravel_index(p.argmax(), p.shape)
+        self.pos.x = x
+        self.pos.y = y
+
+        self.msg_robot_marker.pose.position.x = x + 0.5
+        self.msg_robot_marker.pose.position.y = y + 0.5
+        self.pub_mark.publish(self.msg_robot_marker)
+        self.pub_pos.publish(self.pos)
+
+    def callback_map(self, data):
+        self.map = (np.asarray(data.data, dtype=np.int8).reshape(data.info.width, data.info.height))
+        self.build_sensor_probabolity_map()
+
+        if self.count == 0:
+            self.init_probability_map()
+            self.count +=1
+            self.pub_pos.publish(self.pos)
+    def callback_move(self, data):
+        self.move = data.data
+        self.move_probability()
+
+if __name__ == '__main__':
+    rospy.init_node('finder')
+    finder = Finder()
+    rospy.spin()
