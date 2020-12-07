@@ -1,63 +1,97 @@
 # Practical Course: Intelligent Mobile Robots with ROS (PCIMR)
 
-## Tutorial 01: Linux, Software & ROS
+## Tutorial 04: Mapping & SLAM
 
 ### Introduction
 
-The purpose of this first tutorial is to demonstrate basic knowledge of the operating system Linux (Ubuntu) by using terminal commands, of the versioning system git by submitting your exercises using github and a basic understanding of ROS, as this will be your main task. You can solve this task using either C++ or Python.
+The purpose of this tutorial is to demonstrate an understanding of the occupancy grid mapping process as
+well as an understanding of the SLAM problem including the problems that can arise when mapping an
+unknown environment.
+You can solve the tasks using either C++ or Python.
 
 After completing this exercise you should be able to
-- navigate & modify the file system of Ubuntu in terminal
-- understand the package system of ROS, be able to write own packages and nodes
-  - Write and debug own subscribers/publishers
-  - Know and understand basic ROS communication including message types and tools for debugging/information
-- manage your software using git; create forks, commits and upload them to github
+- understand and implement the basic occupancy grid mapping algorithm
+- understand how SLAM works including potential challenges and problems like
+  - bad/inexact motion of the robot
+  - loop closure during mapping
 
-If you do not have any prior experience with ROS you may need to go through some of the official [ROS tutorials](http://wiki.ros.org/ROS/Tutorials) first.
+If you have trouble understanding the code or writing your own, please have a look at the [tutorials](http://wiki.ros.org/ROS/Tutorials)  again.
 
+This time only the **second task is mandatory**. You do not need to implement a solution for the first task in
+order to pass the course.
+
+
+---
 ### Code Overview
 
+Visit the provided github [repository]() and have a look at the code for the first exercise by checking out the branch tutorial-04. You fill find the same simulator used in previous exercises but with a few modifications. You can choose to map any of the worlds provided, e.g. the one from tutorial-03, shown in Fig.1.
 
-This repository is a ROS meta-package including a package that provides a rudimentary robot simulator for a 2D grid-world. The world used for this exercise is shown below in Fig. 1.
+As a reminder, the simulation can be started by
+
+    rosrun pcimr_simulation simple_sim_node
+
+This time the simulator publishes a perfect position of the robot as well as an uncertain sensor measurement (/scan) with 4 range measurements by default, see Fig. 2. 
+
+You can move the robot around in order to generate a map by using the key_robot_mover node located in the sim pkg. 
+
+For the second, mandatory task, you will need the Robotino packages. Please make sure to have the current version pulled to your local repository.
 
 
 <table style="margin-left: auto; margin-right: auto; table-layout: fixed; width: 100%">
   <tr>
-    <td style="width: 30%;"> <img src="resources/imgs/map_grid.png"></td>
-    <td style="width: 30%;"> <img src="resources/imgs/robot-sensors.png"> </td>
-    <td style="width: 30%;"> <img src="resources/imgs/map_grid_with-goal.png"></td>
+    <td style="width: 23%;"> <img src="resources/imgs/map_grid_unknown.png"></td>
+    <td style="width: 23%;"> <img src="resources/imgs/robot-sensors.png"></td>
+    <td style="width: 23%;"> <img src="resources/imgs/map_grid.png"></td>
+    <td style="width: 23%;"> <img src="resources/imgs/map_slam.png"></td>
   </tr>
   <tr>
-    <td style="width: 30%;" valign="top"> <b>Fig.1:</b> The grid-world for this exercise, white cells are free space and black ones are occupied.
+    <td style="width: 23%;" valign="top"> <b>Fig.1:</b> Grid-world for this exercise, grey pixels are free space, black ones are occupied and grey/green ones are unknown.
     </td>
-    <td style="width: 30%;" valign="top">  <b>Fig.2:</b> The robots range sensors (red).</td>
-    <td style="width: 30%;" valign="top">  <b>Fig.3:</b> The grid-world for this exercise, with the goal marked in red.
+    <td style="width: 23%;" valign="top">  <b>Fig.2:</b> The robots sensors (red).
+    </td>
+    <td style="width: 23%;" valign="top">  <b>Fig.3:</b> One of the worlds you can choose to map for this task. 
+    </td>
+    <td style="width: 23%;" valign="top">  <b>Fig.4:</b> The world to be mapped, visualized in Gazebo.
     </td>
   </tr>
 </table>
 
 
+<<<<<<< HEAD
 You can run the node simple_sim_node by using
 
     rosrun pcimr_simulation simple_sim_node
+=======
 
-After running the node you should be able to view the info about the node in the terminal using common ROS commands. You will see, that the node publishes on two different topics:
-- the robot position (```/robot_pos```)
-- and the sensor data (```/scan```).
+---
+### Exercise1
 
-The robot has 4 range sensors (+4 optional ones), see Fig. 2. Each sensor measures the distance in tiles to the next object (black cell) in its respective direction. The node also subscribes to the ```/move``` topic, expecting a String as a move command (cardinal direction: ∈ {𝑆, 𝑊, 𝑁, 𝐸}).
+The first (optional) task is to implement the occupancy grid mapping algorithm from this lecture. You write a node in a new pcimr_mapping package that listens to the position and sensor measurements of the robot and publishes an occupancy grid map with estimated occupancy probabilityes (Fig. 3). 
+
+a) Fork and clone the updated ROS code, then checkout the new branch (tutorial-04). Create your own branch and a new ROS package within the provided repository with the name pcimr_localization. 
+b) Now, implement a ROS node with two subscribers and one publisher.
+  - Subscribers receive the robot position/sensor data from the simulator node.
+  - The publisher sends a OccupancyGrid message on the topic /map including the occupancy probabilities for each cell in the environment. Make sure to specify the necessary attributes (e.g. resolution).
+  - Implement the mapping algorithm from the lecture and see how long it takes you to map the world
+c) If you want to check your algorithm and want to challenge yourself a little bit, you can increase the uncertainty of the sensor, or even limit it to just one beam.
 
 
-### Exercises
+### Exercise 2
 
-Your task is it to write a simple planner node, that listens to the position and sensor information from the simulator node and publishes periodical move commands to make the robot reach the goal (red cell) shown in Fig. 3. The robot will start in the bottom left (green cell).
+The second (mandatory) task is to run a SLAM algorithm on the Robotino. You can simply use the one included in the slam.launch launch-file located in the rto_navigation package. If you start the simulation (pull latest changes first) with
 
-1. Fork and clone the provided ROS code into your local catkin-workspace. Build your workspace and make sure it runs as expected.
-2. Create your own branch and your own ROS package within the provided repository. Make sure to read the rest of this exercise first in order to define the correct dependencies when creating the package (you can also add them later).
-3. Now, that you are ready to code, implement a ROS node with two subscribers, one publisher as well as a service call to the simulator node.
-   1. The service call to /init_pos is used to initialize the position of the robot to (2, 0).
-   2. The subscribers receive the robots position and sensor data from the simulator node.
-   3. The publisher sends a simple String as a ROS message on the topic /move.
-   4. Now write a simple logic, that combines this data by selecting a movement (S, W, N, E) at each time step, which will guide the robot to the goal (red), while avoiding obstacles (black) and staying with the world boundaries.
+    roslaunch rto_bringup_sim robot.launch
+>>>>>>> c3e81c370545c3fb14ad75c032e99dc8f73439a8
 
-Note: This is not a complex algorithm. Just think of how you would explain the path to another person.
+and then launch the SLAM algorithm with
+
+    roslaunch rto_navigation slam.launch
+
+you should be already able to move the robot around and create a map with it. 
+
+Your task is it to try and map the world hallway_loop (Fig. 4). You can change the world by simply exporting the environment variable ROBOT_ENV with the respective world name (e.g. hallway_loop).
+
+Now you need to move the robot around, create a world and when you think you are done, just save it with the command rosrun map_server map_saver. This will save the map as an image file together with a yaml file at your current location. 						
+
+Hint: Be careful with the loops…
+
