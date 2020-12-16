@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+
+import rospy
+import numpy as np
+
+from geometry_msgs.msg import Point, Quaternion
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import Path
+from visualization_msgs.msg import Marker
+
+class Node():
+
+    def __init__(self, pos, parent, goal, start):
+
+        self.parent = parent
+        self.pos = pos
+        self.f_cost = abs(self.pos[1] - goal[1]) + abs(self.pos[0] - goal[0]) + abs(self.pos[1] - start[1]) + abs(self.pos[0] - start[0])
+
+    def __gt__(self, other):
+            return self.f_cost > other.f_cost
+
+class A_star():
+
+    def __init__(self):
+        #Subscribers
+        self.sub_goal = rospy.Subscriber('/move_base_simple/goal', PoseStamped, self.Callback_goal)
+        self.sub_map = rospy.Subscriber('/map', OccupancyGrid, self.Callback_map)
+        self.sub_pos = rospy.Subscriber('/robot_pos', Point, self.Callback_pos)
+        #Publishers
+        self.pub_path = rospy.Publisher('/global_path', Path, queue_size=10, latch=True)
+        self.pub_plan = rospy.Publisher('/visualization/plan', Marker, queue_size=10)
+        self.pub_goal = rospy.Publisher('/visualization/goal', Marker, queue_size=10)
+
+        self.map = np.array([])
+        self.robot_pos = Point()
+        self.goal = Point()
+
+        self.msg_goal_marker = Marker()
+        self.msg_goal_marker.header.frame_id = "map"
+        self.msg_goal_marker.ns = "navigation"
+        self.msg_goal_marker.id = 0
+        self.msg_goal_marker.type = Marker.CUBE
+        self.msg_goal_marker.action = Marker.ADD
+        self.msg_goal_marker.scale.x = 1
+        self.msg_goal_marker.scale.y = 1
+        self.msg_goal_marker.scale.z = 0.2
+        self.msg_goal_marker.color.a = 1.0
+        self.msg_goal_marker.color.r = 1.0
+        self.msg_goal_marker.color.g = 0.0
+        self.msg_goal_marker.color.b = 0.0
+        self.msg_goal_marker.pose.orientation = Quaternion(0, 0, 0, 1)
+
+        self.msg_plan_marker = Marker()
+        self.msg_plan_marker.header.frame_id = "map"
+        self.msg_plan_marker.ns = "navigation"
+        self.msg_plan_marker.id = 0
+        self.msg_plan_marker.type = Marker.LINE_STRIP
+        self.msg_plan_marker.action = Marker.ADD
+        self.msg_plan_marker.scale.x = 0.3
+        self.msg_plan_marker.color.a = 0.5
+        self.msg_plan_marker.color.r = 0.0
+        self.msg_plan_marker.color.g = 1.0
+        self.msg_plan_marker.color.b = 0.0
+        self.msg_plan_marker.pose.orientation = Quaternion(0, 0, 0, 1)
+
+        self.msg_path = Path()
+        self.msg_path.header.frame_id = 'map'
+
+
+    def Callback_pos(self, data):
+
+        self.robot_pos = (int(data.y) , int(data.x))
+
+    def Callback_map(self, data):
+
+        self.map = np.array(data.data).reshape(20, 20)
+
+    def Callback_goal(self, data):
+
+        self.goal = (int(data.pose.position.y), int(data.pose.position.x))
+        self.a_star_algorithm()
+
+
+    def a_star_algorithm(self):
+
+        if self.map[self.goal[0], self.goal[1]] == 0:
+            self.open = [Node(self.robot_pos, None, self.goal, self.robot_pos)]
+            self.closed = [self.robot_pos]
+
+            while True:
+                #Get the lowest f_cost in the list
+                current = self.open.pop(0)
+                #Check if it has already reached the goal
+                if current.pos == self.goal:
+                    path = []
+                    while True:
+                        path.append(current.pos)
+                        current = current.parent
+                        if current == None:
+                            break
+                    break
+
+                for new_position in [(0, -1), (0, 1), (-1, 0), (1, 0)]: #, (-1, -1), (-1, 1), (1, -1), (1, 1)
+                    #Check the neighbours and add as child if not in closed list
+                    try:
+                        if self.map[current.pos[0] + new_position[0], current.pos[1] + new_position[1]]  == 0 and (current.pos[0] + new_position[0], current.pos[1] + new_position[1]) not in self.closed:
+                            self.closed.append((current.pos[0] + new_position[0], current.pos[1] + new_position[1]))
+                            self.open.append(Node((current.pos[0] + new_position[0], current.pos[1] + new_position[1]), current, self.goal, self.robot_pos))
+                    except IndexError:
+                        pass
+
+                self.open.sort()
+
+            self.msg_goal_marker.pose.position.x = self.goal[1] + 0.5
+            self.msg_goal_marker.pose.position.y = self.goal[0] + 0.5
+            self.pub_goal.publish(self.msg_goal_marker)
+
+            self.msg_plan_marker.points.clear()
+            for i in path:
+                self.msg_plan_marker.points.append(Point(i[1] + 0.5, i[0] + 0.5, 0))
+            self.pub_plan.publish(self.msg_plan_marker)
+
+            self.msg_path.poses.clear()
+            for i in path[::-1]:
+                self.msg_pose = PoseStamped()
+                self.msg_pose.header.frame_id = 'map'
+                self.msg_pose.pose.position.z = 0
+                self.msg_pose.pose.orientation = Quaternion(0, 0, 0, 1)
+                self.msg_pose.pose.position.x = i[1] 
+                self.msg_pose.pose.position.y = i[0]
+                self.msg_path.poses.append(self.msg_pose)
+            self.pub_path.publish(self.msg_path)
+
+if __name__ == "__main__":
+    rospy.init_node('path_planner')
+    path_planner = A_star()
+    rospy.spin()
